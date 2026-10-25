@@ -195,12 +195,41 @@ function entrar(msg) {
   out.replaceChildren(f); u.focus();
 }
 
+// Primeiro acesso (ou senha resetada): o cliente troca a senha provisória pela dele
+function novaSenha() {
+  document.title = 'Criar senha · Minhas OS';
+  const p1 = el('input', { id: 'nova1', type: 'password', autocomplete: 'new-password', required: '' });
+  const p2 = el('input', { id: 'nova2', type: 'password', autocomplete: 'new-password', required: '' });
+  const err = el('p', { class: 'erro', role: 'alert' });
+  const bt = el('button', { type: 'submit', class: 'btn' }, 'Salvar senha');
+  const f = el('form', { class: 'login' },
+    el('h1', {}, 'Crie sua senha'),
+    el('p', { class: 'muted', style: 'margin:0' }, 'A senha que você recebeu é provisória. Escolha uma senha sua para os próximos acessos.'),
+    el('label', { for: 'nova1' }, 'Nova senha', el('span', { class: 'muted small' }, 'Pelo menos 6 caracteres'), p1),
+    el('label', { for: 'nova2' }, 'Repita a nova senha', p2),
+    err, bt);
+  f.addEventListener('submit', async e => {
+    e.preventDefault(); err.textContent = '';
+    if (p1.value.length < 6) { err.textContent = 'A senha precisa ter pelo menos 6 caracteres.'; return; }
+    if (p1.value !== p2.value) { err.textContent = 'As duas senhas não são iguais.'; return; }
+    bt.disabled = true; bt.textContent = 'Salvando…';
+    try {
+      const t = JSON.parse(await rpc('portal_nova_senha', { p_token: token, p_senha: p1.value }));
+      if (!t) { SS.set(''); token = ''; return entrar('Sua sessão terminou. Entre de novo.'); }
+      token = t; SS.set(t); last = ''; out.replaceChildren(el('p', { class: 'empty muted' }, 'Carregando…')); load();
+    } catch { err.textContent = 'Sem conexão. Tente de novo.'; }
+    finally { bt.disabled = false; bt.textContent = 'Salvar senha'; }
+  });
+  out.replaceChildren(f); p1.focus();
+}
+
 async function load() {
   if (!token) return dados ? null : entrar();
   try {
     const txt = await rpc('portal_cliente', { p_token: token }), d = JSON.parse(txt);
     if (!d) { SS.set(''); token = ''; dados = null; last = ''; return entrar('Sua sessão terminou. Entre de novo.'); }
     pasta = d.pasta; document.getElementById('empresa').textContent = d.empresa || 'Minhas OS';
+    if (d.trocarSenha) { if (!document.getElementById('nova1')) novaSenha(); return; }
     if (txt !== last) { last = txt; dados = d; mostrar(); }
   } catch { if (!last) aviso('Não foi possível carregar agora. Verifique a conexão e tente de novo.'); }
 }
