@@ -62,6 +62,14 @@ footer{font-size:13px;color:var(--muted)}
 .erro{color:var(--bad);margin:0;min-height:1.2em;font-size:15px}
 button.link{background:none;border:0;padding:0;font:inherit;color:var(--muted);text-decoration:underline;cursor:pointer}
 input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.tbl{width:100%;border-collapse:collapse;font-size:15px}
+.tbl th{text-align:left;font-size:13px;font-weight:600;color:var(--muted);padding:0 8px 6px 0}
+.tbl td{border-top:1px solid var(--line);padding:7px 8px 7px 0;vertical-align:top}
+.tbl .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;padding-right:0}
+.tbl tfoot td{font-weight:600;font-size:17px}
+.ck-ok{color:var(--ok)}.ck-atencao{color:var(--warn)}.ck-trocado{color:var(--info)}.ck-na{color:var(--muted)}
+.mapa{width:100%;aspect-ratio:4/3;max-height:360px;border:0;border-radius:12px;display:block;background:var(--line);margin-top:8px}
+.assin{max-width:240px;max-height:100px;display:block;background:#fff;border-radius:8px;margin-top:8px}
 .voltar{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;margin-bottom:-10px}
 </style></head><body>
 <header><div class="wrap"><img src="icons/icon-192.png" alt=""><b id="empresa">Longhi Manutenções</b></div></header>
@@ -92,6 +100,12 @@ const hora = ts => new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', m
 const mesmoDia = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 const periodo = x => x.fim ? `${quando(x.ini)}–${mesmoDia(x.ini, x.fim) ? hora(x.fim) : quando(x.fim)}` : `desde ${quando(x.ini)}`;
 const TIPO = { deslocamento: 'Deslocamento', trabalho: 'Atendimento', pausa: 'Pausa' };
+const TIPOS = { revisao: 'Revisão', plantio: 'Acompanhamento de plantio', diagnostico: 'Diagnóstico', manutencao: 'Manutenção / reparo', outro: 'Outro' };
+const CK = { ok: 'OK', atencao: 'Atenção', trocado: 'Trocado', na: 'N/A' };
+const num = v => { const x = typeof v === 'string' ? Number(v.replace(',', '.')) : Number(v); return isFinite(x) ? x : 0; };
+const horas = h => { const m = Math.round(num(h) * 60); return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`; };
+const km = v => `${num(v).toLocaleString('pt-BR')} km`;
+const ha = ts => { const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : `às ${hora(ts)}`; };
 
 let pasta = '';
 const urls = {};
@@ -101,6 +115,12 @@ function foto(id) {
     .then(r => r.ok ? r.blob() : null).then(b => b && (urls[id] = URL.createObjectURL(b)));
   load.then(u => { if (u) { img.src = u; a.href = u; a.target = '_blank'; } else a.remove(); }).catch(() => a.remove());
   return a;
+}
+function imagem(id, cls) {
+  const img = el('img', { alt: 'Assinatura', class: cls });
+  fetch(`${C.supabaseUrl}/storage/v1/object/authenticated/fotos/${pasta}/${encodeURIComponent(id)}`, { headers: H })
+    .then(r => r.ok ? r.blob() : null).then(b => { if (b) img.src = URL.createObjectURL(b); else img.remove(); }).catch(() => img.remove());
+  return img;
 }
 const fotos = ids => { const l = (ids || []).filter(i => /^sb-/.test(i)); return l.length ? el('div', { class: 'fotos' }, l.map(foto)) : null; };
 const bloco = (titulo, txt, ids) => (txt || (ids || []).some(i => /^sb-/.test(i))) ? el('section', {}, el('h2', {}, titulo), txt ? el('p', {}, txt) : null, fotos(ids)) : null;
@@ -133,33 +153,72 @@ function lista(d) {
   document.getElementById('btnSair').onclick = () => { rpc('portal_sair', { p_token: token }).catch(() => {}); SS.set(''); token = ''; dados = null; last = ''; entrar(); };
 }
 
+const dl = pares => { const p = pares.filter(x => x[1] != null && x[1] !== ''); return p.length ? el('dl', { class: 'info', style: 'margin:0' }, p.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, String(v))])) : null; };
+const tabela = (head, rows, foot, right = []) => el('table', { class: 'tbl' },
+  el('thead', {}, el('tr', {}, head.map((h, i) => el('th', right.includes(i) ? { class: 'r' } : {}, h)))),
+  el('tbody', {}, rows.map(r => el('tr', {}, r.map((c, i) => c?.nodeType ? el('td', {}, c) : el('td', right.includes(i) ? { class: 'r' } : {}, c ?? ''))))),
+  foot ? el('tfoot', {}, el('tr', {}, foot.map((c, i) => el('td', right.includes(i) ? { class: 'r' } : {}, c)))) : null);
+
+// Onde o técnico está: última posição enviada pelo app enquanto a OS está em andamento
+function mapa(p) {
+  const dy = 0.012, dx = 0.018, bbox = [p.lng - dx, p.lat - dy, p.lng + dx, p.lat + dy].map(v => v.toFixed(5)).join(',');
+  return el('section', {}, el('h2', {}, 'Onde o técnico está'),
+    el('div', { class: 'small muted' }, `Posição ${ha(p.em)}. `, el('a', { href: `https://www.google.com/maps?q=${p.lat},${p.lng}`, target: '_blank', rel: 'noopener', style: 'color:inherit' }, 'Abrir no mapa')),
+    el('iframe', { class: 'mapa', title: 'Mapa', loading: 'lazy', referrerpolicy: 'strict-origin-when-cross-origin',
+      src: `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${p.lat},${p.lng}` }));
+}
+
 function detalhe(d, o) {
-  const os = osNome(o);
+  const os = osNome(o), fin = !ativa(o), tipo = TIPOS[o.tipo] || o.tipo || '';
   document.title = `${os} · ${d.empresa || 'Minhas OS'}`;
   const ap = (o.apontamentos || []).filter(x => x.ini).sort((a, b) => a.ini - b.ini);
   const passo = PASSO[o.status] || 1, cor = COR[o.status] || 'var(--muted)';
   const testes = (o.testes || []).filter(t => t.desc || (t.fotos || []).length);
+  const mat = (o.materiais || []).filter(m => m.desc || num(m.qtd));
+  const v = o.valores, ck = o.checklist || [];
+  const fotosMaq = [o.fotoHorimetro, o.fotoChassi].filter(Boolean);
   out.replaceChildren(...[
     el('a', { class: 'voltar', href: '#' }, '‹ Minhas OS'),
     el('section', {},
-      el('div', { class: 'muted small' }, [o.tipo, fmtDate(o.data)].filter(Boolean).join(' · ')),
+      el('div', { class: 'muted small' }, [tipo, fmtDate(o.data)].filter(Boolean).join(' · ')),
       el('h1', {}, os),
       el('div', { style: 'margin-top:10px' }, el('span', { class: 'st', style: `--c:${cor}` }, stTxt(o))),
       el('div', { class: 'steps', style: `--c:${cor}` }, [1, 2, 3, 4].map(i => el('div', { class: i <= passo ? 'on' : '' }))),
       el('div', { class: 'steplbl' }, el('span', {}, 'Agendado'), el('span', {}, 'A caminho'), el('span', {}, 'Atendimento'), el('span', {}, 'Finalizada'))),
-    o.maquina ? el('section', {}, el('dl', { class: 'info', style: 'margin:0' }, el('dt', {}, 'Máquina'), el('dd', {}, o.maquina + (o.serie ? ` · série ${o.serie}` : '')))) : null,
+    o.posicao ? mapa(o.posicao) : null,
+    el('section', {}, el('h2', {}, 'Cliente'), dl([['Cliente', d.cliente], ['Fazenda', d.fazenda], ['CPF / CNPJ', d.documento], ['Localização', d.local]])),
+    el('section', {}, el('h2', {}, 'Máquina e serviço'),
+      dl([['Máquina', o.maquina], ['Série / chassi', o.serie], ['Ano', o.ano], ['Horímetro', o.horimetro ? `${o.horimetro} h` : ''], ['Serviço', tipo], ['Data', fmtDate(o.data)]]),
+      fotos(fotosMaq)),
     bloco('Falha', o.falha, o.fotosFalha),
     bloco('Causa', o.causa),
     bloco('Solução', o.solucao),
-    testes.length ? el('section', {}, el('h2', {}, 'Testes realizados'), testes.map(t => el('div', { class: 'teste' }, t.desc ? el('p', {}, t.desc) : null, fotos(t.fotos)))) : null,
+    testes.length ? el('section', {}, el('h2', {}, 'Testes realizados'), testes.map((t, i) => el('div', { class: 'teste' }, el('p', {}, `${i + 1}. ${t.desc || 'Teste'}`), fotos(t.fotos)))) : null,
+    mat.length ? el('section', {}, el('h2', {}, 'Materiais de consumo'), fin
+      ? tabela(['Descrição', 'Qtd', 'Valor un.', 'Subtotal'], mat.map(m => [m.desc, String(m.qtd ?? ''), brl(num(m.valor)), brl(num(m.qtd) * num(m.valor))]), null, [1, 2, 3])
+      : tabela(['Descrição', 'Qtd'], mat.map(m => [m.desc, String(m.qtd ?? '')]), null, [1])) : null,
     bloco('Fotos do serviço', '', o.fotos),
-    bloco('Cuidados', o.cuidados),
-    o.total != null ? el('section', { class: 'total' }, el('span', {}, 'Valor total'), el('b', { class: 'num' }, brl(o.total))) : null,
-    ap.length ? el('section', {}, el('h2', {}, 'Horários'), el('div', { class: 'hist' },
-      ap.map(x => el('div', {}, el('span', {}, x.tipo === 'pausa' ? `Pausado${x.motivo ? ': ' + x.motivo : ''}` : TIPO[x.tipo] || x.tipo), el('span', {}, x.tipo === 'pausa' ? quando(x.ini) : periodo(x)))))) : null,
-    o.assinadoEm ? el('p', { class: 'small muted' }, `Serviço conferido e assinado em ${quando(o.assinadoEm)}.`) : null,
+    ck.length ? el('section', {}, el('h2', {}, 'Checklist'), tabela(['Item verificado', 'Situação'], ck.map(x => [x.item, el('b', { class: 'ck-' + x.estado }, CK[x.estado] || x.estado)]))) : null,
+    bloco('Cuidados e recomendações', o.cuidados),
+    ap.length ? el('section', {}, el('h2', {}, 'Apontamentos'), el('div', { class: 'hist' },
+      ap.map(x => el('div', {},
+        el('span', {}, x.tipo === 'pausa' ? `Pausado${x.motivo ? ': ' + x.motivo : ''}` : (TIPO[x.tipo] || x.tipo) + (x.tipo === 'deslocamento' && x.kmIni != null && x.kmFim != null ? ` · ${km(num(x.kmFim) - num(x.kmIni))}` : '')),
+        el('span', {}, x.tipo === 'pausa' ? quando(x.ini) : periodo(x)))))) : null,
+    v ? el('section', {}, el('h2', {}, 'Valores'), tabela(['Descrição', 'Quantidade', 'Valor'], [
+        ['Mão de obra', horas(v.horas), brl(v.mo)],
+        ['Deslocamento', km(v.km), brl(v.desl)],
+        ['Materiais de consumo', mat.length ? `${mat.length} item(ns)` : '—', brl(v.pecas)]], ['Total', '', brl(o.total)], [1, 2]))
+      : o.total != null ? el('section', { class: 'total' }, el('span', {}, 'Valor total'), el('b', { class: 'num' }, brl(o.total))) : null,
+    o.assinatura ? el('section', {}, el('h2', {}, 'Assinatura do cliente'),
+      o.total != null ? el('p', { class: 'small' }, `Declaro que concordo com os serviços descritos nesta ordem de serviço e com o valor total cobrado de ${brl(o.total)}.`) : null,
+      o.assinatura.id && /^sb-/.test(o.assinatura.id) ? imagem(o.assinatura.id, 'assin') : null,
+      el('p', { class: 'small muted', style: 'margin-top:6px' }, [o.assinatura.nome, o.assinatura.em && quando(o.assinatura.em)].filter(Boolean).join(' · '))) : null,
     zap(d.telefone, `Olá, sobre a ${os}`),
-    el('footer', {}, o.atualizadoEm ? `Atualizado em ${quando(o.atualizadoEm)}. Esta página se atualiza sozinha.` : 'Esta página se atualiza sozinha.')].filter(Boolean));
+    el('footer', {},
+      el('div', {}, [d.empresa, d.cnpj && `CNPJ ${d.cnpj}`].filter(Boolean).join(' · ')),
+      [d.telefone, d.email].some(Boolean) ? el('div', {}, [d.telefone, d.email].filter(Boolean).join(' · ')) : null,
+      d.endereco ? el('div', {}, d.endereco) : null,
+      el('div', { style: 'margin-top:6px' }, o.atualizadoEm ? `Atualizado em ${quando(o.atualizadoEm)}. Esta página se atualiza sozinha.` : 'Esta página se atualiza sozinha.'))].filter(Boolean));
 }
 const aviso = txt => out.replaceChildren(el('p', { class: 'empty muted' }, txt));
 
@@ -237,7 +296,9 @@ async function load() {
 }
 addEventListener('hashchange', mostrar);
 load();
-setInterval(() => { if (!document.hidden && token) load(); }, 60000);
+// a cada minuto; a cada 20 s enquanto alguma OS mostra a posição do técnico
+let tick = 0;
+setInterval(() => { tick++; if (!document.hidden && token && (tick % 3 === 0 || dados?.os.some(o => o.posicao))) load(); }, 20000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) load(); });
 })();
 </script>
