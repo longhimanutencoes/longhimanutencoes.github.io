@@ -42,6 +42,10 @@ p{margin:0;white-space:pre-wrap}
 .fotos a{display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--line)}
 .fotos img{width:100%;height:100%;object-fit:cover;display:block}
 .teste+.teste{margin-top:10px}
+.ponto{border-top:1px solid var(--line);padding:8px 0}
+.ponto:first-of-type{border-top:0;padding-top:0}
+.ponto .lin{display:flex;justify-content:space-between;gap:12px}
+.ponto p{margin:2px 0 0}
 .btn{display:inline-block;font:600 16px var(--body);text-decoration:none;color:#000;background:var(--brand);border-radius:10px;padding:10px 16px}
 .empty{text-align:center;padding:48px 0}
 footer{font-size:13px;color:var(--muted)}
@@ -67,7 +71,7 @@ input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(-
 .tbl td{border-top:1px solid var(--line);padding:7px 8px 7px 0;vertical-align:top}
 .tbl .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;padding-right:0}
 .tbl tfoot td{font-weight:600;font-size:17px}
-.ck-ok{color:var(--ok)}.ck-atencao{color:var(--warn)}.ck-trocado{color:var(--info)}.ck-na{color:var(--muted)}
+.ck-ok{color:var(--ok)}.ck-nok{color:var(--bad)}.ck-atencao{color:var(--warn)}.ck-trocado{color:var(--info)}.ck-na{color:var(--muted)}
 .mapa{width:100%;aspect-ratio:4/1;max-height:120px;border:0;border-radius:12px;display:block;background:var(--line);margin-top:8px}
 .assin{max-width:240px;max-height:100px;display:block;background:#fff;border-radius:8px;margin-top:8px}
 .voltar{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;margin-bottom:-10px}
@@ -101,7 +105,7 @@ const mesmoDia = (a, b) => new Date(a).toDateString() === new Date(b).toDateStri
 const periodo = x => x.fim ? `${quando(x.ini)}–${mesmoDia(x.ini, x.fim) ? hora(x.fim) : quando(x.fim)}` : `desde ${quando(x.ini)}`;
 const TIPO = { deslocamento: 'Deslocamento', trabalho: 'Atendimento', pausa: 'Pausa' };
 const TIPOS = { revisao: 'Revisão', plantio: 'Acompanhamento de plantio', diagnostico: 'Diagnóstico', manutencao: 'Manutenção / reparo', outro: 'Outro' };
-const CK = { ok: 'OK', atencao: 'Atenção', trocado: 'Trocado', na: 'N/A' };
+const CK = { ok: 'OK', nok: 'Não OK', atencao: 'Atenção', trocado: 'Trocado', na: 'N/A' };
 const num = v => { const x = typeof v === 'string' ? Number(v.replace(',', '.')) : Number(v); return isFinite(x) ? x : 0; };
 const horas = h => num(h).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' h';
 const km = v => `${num(v).toLocaleString('pt-BR')} km`;
@@ -198,7 +202,9 @@ function detalhe(d, o) {
       ? tabela(['Descrição', 'Qtd', 'Valor un.', 'Subtotal'], mat.map(m => [m.desc, String(m.qtd ?? ''), brl(num(m.valor)), brl(num(m.qtd) * num(m.valor))]), null, [1, 2, 3])
       : tabela(['Descrição', 'Qtd'], mat.map(m => [m.desc, String(m.qtd ?? '')]), null, [1])) : null,
     bloco('Fotos do serviço', '', o.fotos),
-    ck.length ? el('section', {}, el('h2', {}, 'Checklist'), tabela(['Item verificado', 'Situação'], ck.map(x => [x.item, el('b', { class: 'ck-' + x.estado }, CK[x.estado] || x.estado)]))) : null,
+    ck.length ? el('section', {}, el('h2', {}, 'Checklist de inspeção'), ck.map(x => el('div', { class: 'ponto' },
+      el('div', { class: 'lin' }, el('span', {}, x.item), x.estado ? el('b', { class: 'ck-' + x.estado }, CK[x.estado] || x.estado) : null),
+      x.obs ? el('p', { class: 'muted small' }, x.obs) : null, fotos(x.fotos)))) : null,
     bloco('Cuidados e recomendações', o.cuidados),
     ap.length ? el('section', {}, el('h2', {}, 'Apontamentos'), el('div', { class: 'hist' },
       ap.map(x => el('div', {},
