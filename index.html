@@ -42,6 +42,8 @@ p{margin:0;white-space:pre-wrap}
 .fotos a{display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--line)}
 .fotos img{width:100%;height:100%;object-fit:cover;display:block}
 .teste+.teste{margin-top:10px}
+.grupo{font-size:15px;margin:14px 0 6px}
+.grupo:first-of-type{margin-top:0}
 .ponto{border-top:1px solid var(--line);padding:8px 0}
 .ponto:first-of-type{border-top:0;padding-top:0}
 .ponto .lin{display:flex;justify-content:space-between;gap:12px}
@@ -105,6 +107,8 @@ const mesmoDia = (a, b) => new Date(a).toDateString() === new Date(b).toDateStri
 const periodo = x => x.fim ? `${quando(x.ini)}–${mesmoDia(x.ini, x.fim) ? hora(x.fim) : quando(x.fim)}` : `desde ${quando(x.ini)}`;
 const TIPO = { deslocamento: 'Deslocamento', trabalho: 'Atendimento', pausa: 'Pausa' };
 const TIPOS = { revisao: 'Revisão', plantio: 'Acompanhamento de plantio', diagnostico: 'Diagnóstico', manutencao: 'Manutenção / reparo', outro: 'Outro' };
+// pontos do checklist separados pelo grupo (Revisão trator, Plantadeira...); sem grupo ficam em "Outros pontos"
+const grupos = ck => { const ns = [...new Set(ck.map(x => x.grupo || ''))]; return ns.map(n => [ns.length > 1 || n ? n || 'Outros pontos' : '', ck.filter(x => (x.grupo || '') === n)]); };
 const CK = { ok: 'OK', nok: 'Não OK', atencao: 'Atenção', trocado: 'Trocado', na: 'N/A' };
 const num = v => { const x = typeof v === 'string' ? Number(v.replace(',', '.')) : Number(v); return isFinite(x) ? x : 0; };
 const horas = h => num(h).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' h';
@@ -202,9 +206,11 @@ function detalhe(d, o) {
       ? tabela(['Descrição', 'Qtd', 'Valor un.', 'Subtotal'], mat.map(m => [m.desc, String(m.qtd ?? ''), brl(num(m.valor)), brl(num(m.qtd) * num(m.valor))]), null, [1, 2, 3])
       : tabela(['Descrição', 'Qtd'], mat.map(m => [m.desc, String(m.qtd ?? '')]), null, [1])) : null,
     bloco('Fotos do serviço', '', o.fotos),
-    ck.length ? el('section', {}, el('h2', {}, 'Checklist de inspeção'), ck.map(x => el('div', { class: 'ponto' },
-      el('div', { class: 'lin' }, el('span', {}, x.item), x.estado ? el('b', { class: 'ck-' + x.estado }, CK[x.estado] || x.estado) : null),
-      x.obs ? el('p', { class: 'muted small' }, x.obs) : null, fotos(x.fotos)))) : null,
+    ck.length ? el('section', {}, el('h2', {}, 'Checklist de inspeção'), grupos(ck).flatMap(([g, l]) => [
+      g ? el('h3', { class: 'grupo' }, g) : null,
+      ...l.map(x => el('div', { class: 'ponto' },
+        el('div', { class: 'lin' }, el('span', {}, x.item), x.estado ? el('b', { class: 'ck-' + x.estado }, CK[x.estado] || x.estado) : null),
+        x.obs ? el('p', { class: 'muted small' }, x.obs) : null, fotos(x.fotos)))])) : null,
     bloco('Cuidados e recomendações', o.cuidados),
     ap.length ? el('section', {}, el('h2', {}, 'Apontamentos'), el('div', { class: 'hist' },
       ap.map(x => el('div', {},
