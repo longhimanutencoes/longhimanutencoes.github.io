@@ -68,7 +68,7 @@ input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(-
 .tbl .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;padding-right:0}
 .tbl tfoot td{font-weight:600;font-size:17px}
 .ck-ok{color:var(--ok)}.ck-atencao{color:var(--warn)}.ck-trocado{color:var(--info)}.ck-na{color:var(--muted)}
-.mapa{width:100%;aspect-ratio:4/3;max-height:360px;border:0;border-radius:12px;display:block;background:var(--line);margin-top:8px}
+.mapa{width:100%;aspect-ratio:4/1;max-height:120px;border:0;border-radius:12px;display:block;background:var(--line);margin-top:8px}
 .assin{max-width:240px;max-height:100px;display:block;background:#fff;border-radius:8px;margin-top:8px}
 .voltar{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;margin-bottom:-10px}
 </style></head><body>
@@ -161,7 +161,7 @@ const tabela = (head, rows, foot, right = []) => el('table', { class: 'tbl' },
 
 // Onde o técnico está: última posição enviada pelo app enquanto a OS está em andamento
 function mapa(p) {
-  const dy = 0.012, dx = 0.018, bbox = [p.lng - dx, p.lat - dy, p.lng + dx, p.lat + dy].map(v => v.toFixed(5)).join(',');
+  const dy = 0.006, dx = 0.024, bbox = [p.lng - dx, p.lat - dy, p.lng + dx, p.lat + dy].map(v => v.toFixed(5)).join(',');
   return el('section', {}, el('h2', {}, 'Onde o técnico está'),
     el('div', { class: 'small muted' }, `Posição ${ha(p.em)}. `, el('a', { href: `https://www.google.com/maps?q=${p.lat},${p.lng}`, target: '_blank', rel: 'noopener', style: 'color:inherit' }, 'Abrir no mapa')),
     el('iframe', { class: 'mapa', title: 'Mapa', loading: 'lazy', referrerpolicy: 'strict-origin-when-cross-origin',
@@ -185,7 +185,7 @@ function detalhe(d, o) {
       el('div', { style: 'margin-top:10px' }, el('span', { class: 'st', style: `--c:${cor}` }, stTxt(o))),
       el('div', { class: 'steps', style: `--c:${cor}` }, [1, 2, 3, 4].map(i => el('div', { class: i <= passo ? 'on' : '' }))),
       el('div', { class: 'steplbl' }, el('span', {}, 'Agendado'), el('span', {}, 'A caminho'), el('span', {}, 'Atendimento'), el('span', {}, 'Finalizada'))),
-    o.posicao ? mapa(o.posicao) : null,
+    o.posicao && ['deslocamento', 'andamento'].includes(o.status) ? mapa(o.posicao) : null,
     el('section', {}, el('h2', {}, 'Cliente'), dl([['Cliente', d.cliente], ['Fazenda', d.fazenda], ['CPF / CNPJ', d.documento], ['Localização', d.local]])),
     el('section', {}, el('h2', {}, 'Máquina e serviço'),
       dl([['Máquina', o.maquina], ['Série / chassi', o.serie], ['Ano', o.ano], ['Horímetro', o.horimetro ? `${o.horimetro} h` : ''], ['Serviço', tipo], ['Data', fmtDate(o.data)]]),
@@ -298,7 +298,7 @@ addEventListener('hashchange', mostrar);
 load();
 // a cada minuto; a cada 20 s enquanto alguma OS mostra a posição do técnico
 let tick = 0;
-setInterval(() => { tick++; if (!document.hidden && token && (tick % 3 === 0 || dados?.os.some(o => o.posicao))) load(); }, 20000);
+setInterval(() => { tick++; if (!document.hidden && token && (tick % 3 === 0 || dados?.os.some(o => o.posicao && ['deslocamento', 'andamento'].includes(o.status)))) load(); }, 20000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) load(); });
 })();
 </script>
