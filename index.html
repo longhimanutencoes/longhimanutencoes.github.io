@@ -103,7 +103,7 @@ const TIPO = { deslocamento: 'Deslocamento', trabalho: 'Atendimento', pausa: 'Pa
 const TIPOS = { revisao: 'Revisão', plantio: 'Acompanhamento de plantio', diagnostico: 'Diagnóstico', manutencao: 'Manutenção / reparo', outro: 'Outro' };
 const CK = { ok: 'OK', atencao: 'Atenção', trocado: 'Trocado', na: 'N/A' };
 const num = v => { const x = typeof v === 'string' ? Number(v.replace(',', '.')) : Number(v); return isFinite(x) ? x : 0; };
-const horas = h => { const m = Math.round(num(h) * 60); return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`; };
+const horas = h => num(h).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' h';
 const km = v => `${num(v).toLocaleString('pt-BR')} km`;
 const ha = ts => { const m = Math.round((Date.now() - ts) / 60000); return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : `às ${hora(ts)}`; };
 
