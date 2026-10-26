@@ -48,6 +48,10 @@ p{margin:0;white-space:pre-wrap}
 .ponto:first-of-type{border-top:0;padding-top:0}
 .ponto .lin{display:flex;justify-content:space-between;gap:12px}
 .ponto p{margin:2px 0 0}
+.ponto .lin{align-items:center}
+.ponto .item{display:flex;align-items:center;gap:10px;min-width:0}
+.ponto .ref a,.ponto .ref img{width:44px;height:44px;display:block;border-radius:8px;object-fit:cover;flex:none}
+.ponto .fotos{margin-top:8px}
 .btn{display:inline-block;font:600 16px var(--body);text-decoration:none;color:#000;background:var(--brand);border-radius:10px;padding:10px 16px}
 .empty{text-align:center;padding:48px 0}
 footer{font-size:13px;color:var(--muted)}
@@ -209,7 +213,7 @@ function detalhe(d, o) {
     ck.length ? el('section', {}, el('h2', {}, 'Checklist de inspeção'), grupos(ck).flatMap(([g, l]) => [
       g ? el('h3', { class: 'grupo' }, g) : null,
       ...l.map(x => el('div', { class: 'ponto' },
-        el('div', { class: 'lin' }, el('span', {}, x.item), x.estado ? el('b', { class: 'ck-' + x.estado }, CK[x.estado] || x.estado) : null),
+        el('div', { class: 'lin' }, el('span', { class: 'item' }, /^sb-/.test(x.ref || '') ? el('span', { class: 'ref' }, foto(x.ref)) : null, x.item), x.estado ? el('b', { class: 'ck-' + x.estado }, CK[x.estado] || x.estado) : null),
         x.obs ? el('p', { class: 'muted small' }, x.obs) : null, fotos(x.fotos)))])) : null,
     bloco('Cuidados e recomendações', o.cuidados),
     ap.length ? el('section', {}, el('h2', {}, 'Apontamentos'), el('div', { class: 'hist' },
