@@ -80,8 +80,8 @@ input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(-
 .ck-ok{color:var(--ok)}.ck-nok{color:var(--bad)}.ck-atencao{color:var(--warn)}.ck-trocado{color:var(--info)}.ck-na{color:var(--muted)}
 .mapa{width:100%;aspect-ratio:4/1;max-height:120px;border:0;border-radius:12px;display:block;background:var(--line);margin-top:8px}
 .assin{max-width:240px;max-height:100px;display:block;background:#fff;border-radius:8px;margin-top:8px}
-.abas{display:flex;gap:6px;background:var(--surface);border-radius:10px;padding:4px;align-self:flex-start}
-.abas a{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;padding:6px 14px;border-radius:7px}
+.abas{display:flex;gap:4px;background:var(--surface);border-radius:10px;padding:4px}
+.abas a{flex:1;text-align:center;white-space:nowrap;color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;padding:6px 8px;border-radius:7px}
 .abas a[aria-current]{background:var(--ink);color:var(--bg)}
 .kpis{display:grid;grid-template-columns:1fr 1fr 1.8fr;gap:8px}
 .kpi{background:var(--surface);border-radius:12px;padding:12px;min-width:0}
@@ -101,6 +101,13 @@ details.maq summary::-webkit-details-marker{display:none}
 details.maq .cards{margin-top:10px}
 details.maq .card{background:var(--bg)}
 @media (max-width:420px){.kpi b{font-size:18px}.kpi{padding:10px}}
+.resumo{background:var(--surface);border-radius:12px;padding:2px 14px}
+.resumo div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.resumo div:last-child{border-bottom:0}
+.resumo span{color:var(--muted)}
+.resumo b{font-size:18px;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips a{font-size:14px;font-weight:600;color:var(--ink);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:3px 10px}
 .voltar{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;margin-bottom:-10px}
 </style></head><body>
 <header><div class="wrap"><img src="icons/icon-192.png" alt=""><b id="empresa">Longhi Manutenções</b></div></header>
@@ -165,17 +172,64 @@ const stTxt = o => { const l = STATUS[o.status] || o.status || '', p = pausaDe(o
 const brl = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const zap = (tel, msg) => { const t = String(tel || '').replace(/\D/g, ''); return t ? el('section', {}, el('a', { class: 'btn', href: `https://wa.me/${t.length <= 11 ? '55' + t : t}?text=${encodeURIComponent(msg)}`, target: '_blank', rel: 'noopener' }, 'Falar no WhatsApp')) : null; };
 
+// Cobrança da OS finalizada: a faturar, aguardando pagamento (ou vencida) e paga
+const hoje = () => new Date().toLocaleDateString('sv');
+const fatNome = f => 'Fatura ' + String(f.numero || 0).padStart(4, '0');
+const fatDe = o => o.faturaId && (dados?.faturas || []).find(f => f.id === o.faturaId);
+const fatSit = f => f.status === 'paga' ? 'paga' : f.vencimento && f.vencimento < hoje() ? 'vencida' : 'aberta';
+const FSIT = { paga: ['Paga', 'var(--ok)'], vencida: ['Pagamento vencido', 'var(--bad)'], aberta: ['Aguardando pagamento', 'var(--info)'] };
+function cobranca(o) {
+  if (ativa(o) || !dados?.faturas) return null;  // sem a lista de faturas não dá para saber
+  const f = fatDe(o);
+  if (!f) return ['A faturar', 'var(--warn)'];
+  const [t, c] = FSIT[fatSit(f)];
+  return [f.status === 'paga' && f.pagoEm ? `${t} em ${fmtDate(f.pagoEm)}` : t, c];
+}
+
 function cartao(o) {
   return el('a', { class: 'card', href: '#' + encodeURIComponent(o.id) },
     el('div', { class: 'cardtop' }, el('b', {}, osNome(o)), el('span', { class: 'muted small' }, fmtDate(o.data))),
     o.maquina && el('div', { class: 'small' }, o.maquina),
     (o.categoria || o.falha) && el('div', { class: 'small muted clip' }, [o.categoria, o.falha].filter(Boolean).join(' · ')),
-    el('div', { class: 'cardtop' }, el('span', { class: 'st sm', style: `--c:${COR[o.status] || 'var(--muted)'}` }, stTxt(o)), o.total != null && el('span', { class: 'small num' }, brl(o.total))));
+    el('div', { class: 'cardtop' }, el('span', { class: 'st sm', style: `--c:${COR[o.status] || 'var(--muted)'}` }, stTxt(o)), o.total != null && el('span', { class: 'small num' }, brl(o.total))),
+    (c => c && el('span', { class: 'st sm', style: `--c:${c[1]}` }, c[0]))(cobranca(o)));
+}
+
+function cartaoFat(f) {
+  const [t, c] = FSIT[fatSit(f)], os = (f.osIds || []).map(id => dados.os.find(o => o.id === id)).filter(Boolean);
+  return el('div', { class: 'card' },
+    el('div', { class: 'cardtop' }, el('b', {}, fatNome(f)), el('span', { class: 'num' }, brl(f.total))),
+    el('div', { class: 'small muted' }, [f.emissao && `Emissão ${fmtDate(f.emissao)}`, f.status === 'paga' ? f.pagoEm && `Paga em ${fmtDate(f.pagoEm)}${f.forma ? ' · ' + f.forma : ''}` : f.vencimento && `Vence ${fmtDate(f.vencimento)}`, f.nf && `NF ${f.nf}`].filter(Boolean).join(' · ')),
+    el('span', { class: 'st sm', style: `--c:${c}` }, t),
+    os.length ? el('div', { class: 'chips', style: 'margin-top:6px' }, os.map(o => el('a', { href: '#' + encodeURIComponent(o.id) }, osNome(o)))) : null);
+}
+
+// Financeiro: OS finalizadas ainda sem fatura, faturas aguardando pagamento e faturas pagas
+function financeiro(d) {
+  document.title = `Financeiro · ${d.empresa || 'Minhas OS'}`;
+  const fs = d.faturas || [];
+  const aFaturar = d.os.filter(o => !ativa(o) && !fatDe(o));
+  const abertas = fs.filter(f => f.status !== 'paga').sort((a, b) => String(a.vencimento || '9').localeCompare(String(b.vencimento || '9')));
+  const pagas = fs.filter(f => f.status === 'paga');
+  const soma = l => l.reduce((s, x) => s + num(x.total), 0);
+  out.replaceChildren(...[
+    el('section', {}, el('div', { class: 'muted small' }, 'Financeiro'), el('h1', {}, [d.cliente, d.fazenda].filter(Boolean).join(' · '))),
+    abas('financeiro'),
+    el('section', { class: 'resumo' },
+      [['Aguardando pagamento', soma(abertas)], ['A faturar', soma(aFaturar)], ['Pago', soma(pagas)]].map(([t, v]) => el('div', {}, el('span', {}, t), el('b', { class: 'num' }, brl(v))))),
+    abertas.length ? el('section', {}, el('h2', {}, 'Aguardando pagamento'), el('div', { class: 'cards' }, abertas.map(cartaoFat))) : null,
+    aFaturar.length ? el('section', {}, el('h2', {}, 'A faturar'), el('div', { class: 'cards' }, aFaturar.map(cartao))) : null,
+    pagas.length ? el('section', {}, el('h2', {}, 'Pagas'), el('div', { class: 'cards' }, pagas.map(cartaoFat))) : null,
+    !abertas.length && !aFaturar.length && !pagas.length ? el('p', { class: 'muted' }, 'Nenhuma OS finalizada ainda.') : null,
+    zap(d.telefone, 'Olá, sobre o financeiro'),
+    sair()].filter(Boolean));
+  ligarSair();
 }
 
 const abas = atual => el('nav', { class: 'abas' },
   el('a', atual === 'os' ? { href: '#', 'aria-current': 'page' } : { href: '#' }, 'Ordens de serviço'),
-  el('a', atual === 'painel' ? { href: '#painel', 'aria-current': 'page' } : { href: '#painel' }, 'Painel'));
+  el('a', atual === 'painel' ? { href: '#painel', 'aria-current': 'page' } : { href: '#painel' }, 'Painel'),
+  dados?.faturas ? el('a', atual === 'financeiro' ? { href: '#financeiro', 'aria-current': 'page' } : { href: '#financeiro' }, 'Financeiro') : null);
 const sair = () => el('footer', {}, 'Esta página se atualiza sozinha. ', el('button', { type: 'button', class: 'link', id: 'btnSair' }, 'Sair'));
 const ligarSair = () => { document.getElementById('btnSair').onclick = () => { rpc('portal_sair', { p_token: token }).catch(() => {}); SS.set(''); token = ''; dados = null; last = ''; entrar(); }; };
 
@@ -308,6 +362,7 @@ function detalhe(d, o) {
         ['Deslocamento', km(v.km), brl(v.desl)],
         ['Materiais de consumo', mat.length ? `${mat.length} item(ns)` : '—', brl(v.pecas)]], ['Total', '', brl(o.total)], [1, 2]))
       : o.total != null ? el('section', { class: 'total' }, el('span', {}, 'Valor total'), el('b', { class: 'num' }, brl(o.total))) : null,
+    !ativa(o) && d.faturas ? el('section', {}, el('h2', {}, 'Cobrança'), fatDe(o) ? cartaoFat(fatDe(o)) : el('span', { class: 'st sm', style: '--c:var(--warn)' }, 'A faturar')) : null,
     o.assinatura ? el('section', {}, el('h2', {}, 'Assinatura do cliente'),
       o.total != null ? el('p', { class: 'small' }, `Declaro que concordo com os serviços descritos nesta ordem de serviço e com o valor total cobrado de ${brl(o.total)}.`) : null,
       o.assinatura.id && /^sb-/.test(o.assinatura.id) ? imagem(o.assinatura.id, 'assin') : null,
@@ -325,8 +380,8 @@ let dados = null, last = '', vista = null;
 function mostrar() {
   if (!dados) return;
   const osId = decodeURIComponent(location.hash.slice(1));
-  const o = osId && dados.os.find(x => x.id === osId), tela = o ? o.id : osId === 'painel' ? 'painel' : '';
-  o ? detalhe(dados, o) : tela === 'painel' ? painel(dados) : lista(dados);
+  const o = osId && dados.os.find(x => x.id === osId), tela = o ? o.id : ['painel', 'financeiro'].includes(osId) ? osId : '';
+  o ? detalhe(dados, o) : tela === 'painel' ? painel(dados) : tela === 'financeiro' && dados.faturas ? financeiro(dados) : lista(dados);
   // só volta ao topo ao trocar de tela, não quando os dados se atualizam
   if (vista !== tela) { vista = tela; scrollTo(0, 0); }
 }
