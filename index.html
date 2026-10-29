@@ -112,6 +112,9 @@ details.maq .card{background:var(--bg)}
 button.btn{border:0;cursor:pointer;min-height:46px}
 button.btn:disabled{opacity:.6}
 .btn.sec{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+.pix{display:flex;flex-direction:column;gap:8px;margin-top:8px;align-items:flex-start}
+.pix .qr{background:#fff;border-radius:10px;padding:6px;width:min(240px,100%)}.pix .qr svg{display:block;width:100%;height:auto}
+.pixcod{word-break:break-all;font-family:ui-monospace,Menlo,monospace;color:var(--muted)}
 .campo{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:14px;color:var(--muted);width:100%}
 .campo textarea{font:400 16px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;resize:vertical}
 .voltar{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;margin-bottom:-10px}
@@ -119,6 +122,7 @@ button.btn:disabled{opacity:.6}
 <header><div class="wrap"><img src="icons/icon-192.png" alt=""><b id="empresa">Longhi Manutenções</b></div></header>
 <main><div class="wrap" id="out"><p class="empty muted">Carregando…</p></div></main>
 <script src="config.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script>
 (() => {
 const C = window.CADERNO_CONFIG || {}, out = document.getElementById('out');
@@ -247,13 +251,61 @@ function cartao(o) {
     (c => c && el('span', { class: 'st sm', style: `--c:${c[1]}` }, c[0]))(cobranca(o)));
 }
 
+// Pix (BR Code do Banco Central) com o valor da fatura, igual ao do PDF da fatura
+const ascii = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '').trim();
+const cpfOk = d => { if (!/^\d{11}$/.test(d) || /^(\d)\1+$/.test(d)) return false; for (const t of [9, 10]) { let s = 0; for (let i = 0; i < t; i++) s += +d[i] * (t + 1 - i); if (s * 10 % 11 % 10 !== +d[t]) return false; } return true; };
+function pixTipo(k) {
+  k = String(k || '').trim(); const d = k.replace(/\D/g, '');
+  if (k.includes('@')) return 'email';
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(k)) return 'evp';
+  if (k.startsWith('+') || /[()\s]/.test(k) || ((d.length === 10 || d.length === 11) && !cpfOk(d) && !/[.\/]/.test(k)) || ((d.length === 12 || d.length === 13) && d.startsWith('55'))) return 'cel';
+  return 'doc';
+}
+function pixChave(k, tipo) {
+  k = String(k || '').trim(); if (!k) return '';
+  const d = k.replace(/\D/g, '');
+  switch (tipo || pixTipo(k)) {
+    case 'cel': return '+' + (k.startsWith('+') || (d.length > 11 && d.startsWith('55')) ? d : '55' + d);
+    case 'doc': return d;
+    default: return k.toLowerCase();
+  }
+}
+function crc16(s) { let c = 0xFFFF; for (let i = 0; i < s.length; i++) { c ^= s.charCodeAt(i) << 8; for (let j = 0; j < 8; j++) c = (c & 0x8000 ? (c << 1) ^ 0x1021 : c << 1) & 0xFFFF; } return c.toString(16).toUpperCase().padStart(4, '0'); }
+function pixDe(f) {
+  const x = dados?.pix, chave = x && pixChave(x.chave, x.tipo), valor = Math.round(num(f.total) * 100) / 100;
+  if (!chave || f.status !== 'aberta' || !(valor > 0)) return null;
+  const t = (id, v) => id + String(v.length).padStart(2, '0') + v;
+  const p = t('00', '01') + t('26', t('00', 'br.gov.bcb.pix') + t('01', chave)) + t('52', '0000') + t('53', '986') + t('54', valor.toFixed(2)) + t('58', 'BR')
+    + t('59', ascii(dados.empresa).toUpperCase().slice(0, 25).trim() || 'RECEBEDOR') + t('60', ascii(x.cidade).toUpperCase().slice(0, 15).trim() || 'BRASIL')
+    + t('62', t('05', 'FAT' + String(f.numero || 0).padStart(4, '0'))) + '6304';
+  return p + crc16(p);
+}
+const pixAberto = new Set();
+function pix(f) {
+  const cod = pixDe(f); if (!cod) return null;
+  const box = el('div', { class: 'pix' });
+  const fechar = el('button', { type: 'button', class: 'btn sec' }, 'Pagar com Pix');
+  const montar = () => {
+    if (!pixAberto.has(f.id)) return box.replaceChildren(fechar);
+    const qr = el('div', { class: 'qr' });
+    if (window.qrcode) { const q = qrcode(0, 'M'); q.addData(cod); q.make(); qr.innerHTML = q.createSvgTag({ cellSize: 5, margin: 3, scalable: true }); }
+    const cp = el('button', { type: 'button', class: 'btn' }, 'Copiar código Pix');
+    cp.onclick = async () => { try { await navigator.clipboard.writeText(cod); cp.textContent = 'Código copiado'; setTimeout(() => cp.textContent = 'Copiar código Pix', 2500); } catch { prompt('Copie o código Pix:', cod); } };
+    box.replaceChildren(window.qrcode ? qr : null, el('p', { class: 'small muted' }, 'Leia o QR code no app do banco ou copie o código e use o Pix copia e cola.'), el('div', { class: 'pixcod small' }, cod), cp);
+  };
+  fechar.onclick = () => { pixAberto.add(f.id); montar(); };
+  montar();
+  return box;
+}
+
 function cartaoFat(f) {
   const [t, c] = FSIT[fatSit(f)], os = (f.osIds || []).map(id => dados.os.find(o => o.id === id)).filter(Boolean);
   return el('div', { class: 'card' },
     el('div', { class: 'cardtop' }, el('b', {}, fatNome(f)), el('span', { class: 'num' }, brl(f.total))),
     el('div', { class: 'small muted' }, [f.emissao && `Emissão ${fmtDate(f.emissao)}`, f.status === 'paga' ? f.pagoEm && `Paga em ${fmtDate(f.pagoEm)}${f.forma ? ' · ' + f.forma : ''}` : f.vencimento && `Vence ${fmtDate(f.vencimento)}`, f.nf && `NF ${f.nf}`].filter(Boolean).join(' · ')),
     el('span', { class: 'st sm', style: `--c:${c}` }, t),
-    os.length ? el('div', { class: 'chips', style: 'margin-top:6px' }, os.map(o => el('a', { href: '#' + encodeURIComponent(o.id) }, osNome(o)))) : null);
+    os.length ? el('div', { class: 'chips', style: 'margin-top:6px' }, os.map(o => el('a', { href: '#' + encodeURIComponent(o.id) }, osNome(o)))) : null,
+    pix(f));
 }
 
 // Financeiro: OS finalizadas ainda sem fatura, faturas aguardando pagamento e faturas pagas
