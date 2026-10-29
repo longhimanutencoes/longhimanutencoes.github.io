@@ -108,6 +108,12 @@ details.maq .card{background:var(--bg)}
 .resumo b{font-size:18px;font-weight:600}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chips a{font-size:14px;font-weight:600;color:var(--ink);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.orcacoes{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+button.btn{border:0;cursor:pointer;min-height:46px}
+button.btn:disabled{opacity:.6}
+.btn.sec{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+.campo{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:14px;color:var(--muted);width:100%}
+.campo textarea{font:400 16px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;resize:vertical}
 .voltar{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;margin-bottom:-10px}
 </style></head><body>
 <header><div class="wrap"><img src="icons/icon-192.png" alt=""><b id="empresa">Longhi Manutenções</b></div></header>
@@ -121,7 +127,12 @@ const C = window.CADERNO_CONFIG || {}, out = document.getElementById('out');
 try { localStorage.removeItem('portal-sessao'); } catch {}
 const SS = { get() { try { return sessionStorage.getItem('portal-sessao') || ''; } catch { return ''; } }, set(v) { try { v ? sessionStorage.setItem('portal-sessao', v) : sessionStorage.removeItem('portal-sessao'); } catch {} } };
 let token = SS.get();
-const rpc = async (fn, body) => { const r = await fetch(`${C.supabaseUrl}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); if (!r.ok) throw new Error(r.status); return r.text(); };
+// erro vindo do servidor (ex.: "Este orçamento já foi respondido.") fica em e.msg; sem internet, e.msg fica vazio
+const rpc = async (fn, body) => {
+  const r = await fetch(`${C.supabaseUrl}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { const e = new Error(r.status); try { e.msg = (await r.json()).message; } catch {} throw e; }
+  return r.text();
+};
 const H = { apikey: C.supabaseKey, Authorization: 'Bearer ' + C.supabaseKey };
 const STATUS = { aberto: 'Agendado', deslocamento: 'Técnico a caminho', aguardando: 'Técnico no local', andamento: 'Em atendimento', pausada: 'Pausada', concluido: 'Finalizada', faturado: 'Finalizada' };
 const COR = { aberto: 'var(--warn)', deslocamento: 'var(--info)', aguardando: 'var(--info)', andamento: 'var(--info)', pausada: 'var(--warn)', concluido: 'var(--ok)', faturado: 'var(--ok)' };
@@ -186,12 +197,53 @@ function cobranca(o) {
   return [f.status === 'paga' && f.pagoEm ? `${t} em ${fmtDate(f.pagoEm)}` : t, c];
 }
 
+// Orçamento enviado pelo app: o cliente aprova ou recusa aqui
+const orcSit = o => { const q = o.orcamento; return !q ? null : !q.resposta ? ['Orçamento aguardando sua aprovação', 'var(--warn)'] : q.resposta.aprovado ? ['Orçamento aprovado', 'var(--ok)'] : ['Orçamento recusado', 'var(--bad)']; };
+function orcamento(o) {
+  const q = o.orcamento; if (!q) return null;
+  const r = q.resposta, qtd = l => num(l.qtd).toLocaleString('pt-BR') + (l.un ? ' ' + l.un : '');
+  const sec = el('section', {}, el('h2', {}, 'Orçamento'),
+    tabela(['Descrição', 'Qtd', 'Valor un.', 'Subtotal'], (q.linhas || []).map(l => [l.desc || '', qtd(l), brl(num(l.valor)), brl(num(l.qtd) * num(l.valor))]), ['Total', '', '', brl(num(q.total))], [1, 2, 3]),
+    q.obs ? el('p', { class: 'small muted', style: 'margin-top:8px' }, q.obs) : null);
+  if (r) {
+    sec.append(el('div', { style: 'margin-top:10px' }, el('span', { class: 'st sm', style: `--c:${r.aprovado ? 'var(--ok)' : 'var(--bad)'}` }, `${r.aprovado ? 'Aprovado' : 'Recusado'} em ${quando(r.em)}${r.por ? ' por ' + r.por : ''}`)));
+    if (r.motivo) sec.append(el('p', { class: 'small muted' }, 'Motivo: ' + r.motivo));
+    return sec;
+  }
+  const acoes = el('div', { class: 'orcacoes' }), err = el('p', { class: 'erro', role: 'alert' });
+  const responder = async (aprovar, motivo, bts) => {
+    err.textContent = ''; bts.forEach(b => b.disabled = true);
+    try {
+      const ok = JSON.parse(await rpc('portal_orcamento', { p_token: token, p_os: o.id, p_versao: q.versao, p_aprovar: aprovar, p_motivo: motivo || null }));
+      if (ok === null) { SS.set(''); token = ''; dados = null; last = ''; return entrar('Sua sessão terminou. Entre de novo.'); }
+      acoes.replaceChildren(); last = ''; await load();
+    } catch (e) { err.textContent = e.msg || 'Sem conexão. Tente de novo.'; bts.forEach(b => b.disabled = false); }
+  };
+  const inicio = () => {
+    const ap = el('button', { type: 'button', class: 'btn' }, 'Aprovar orçamento'), rc = el('button', { type: 'button', class: 'btn sec' }, 'Recusar');
+    ap.onclick = () => { if (confirm(`Aprovar o orçamento de ${brl(num(q.total))}?`)) responder(true, null, [ap, rc]); };
+    rc.onclick = recusa;
+    acoes.replaceChildren(ap, rc);
+  };
+  const recusa = () => {
+    const mt = el('textarea', { id: 'motivo', rows: '3', maxlength: '500' });
+    const ok = el('button', { type: 'button', class: 'btn' }, 'Confirmar recusa'), vol = el('button', { type: 'button', class: 'btn sec' }, 'Voltar');
+    ok.onclick = () => responder(false, mt.value.trim(), [ok, vol]); vol.onclick = inicio;
+    acoes.replaceChildren(el('label', { class: 'campo', for: 'motivo' }, 'Motivo (opcional)', mt), ok, vol);
+    mt.focus();
+  };
+  inicio();
+  sec.append(acoes, err);
+  return sec;
+}
+
 function cartao(o) {
   return el('a', { class: 'card', href: '#' + encodeURIComponent(o.id) },
     el('div', { class: 'cardtop' }, el('b', {}, osNome(o)), el('span', { class: 'muted small' }, fmtDate(o.data))),
     o.maquina && el('div', { class: 'small' }, o.maquina),
     (o.categoria || o.falha) && el('div', { class: 'small muted clip' }, [o.categoria, o.falha].filter(Boolean).join(' · ')),
     el('div', { class: 'cardtop' }, el('span', { class: 'st sm', style: `--c:${COR[o.status] || 'var(--muted)'}` }, stTxt(o)), o.total != null && el('span', { class: 'small num' }, brl(o.total))),
+    (c => c && el('span', { class: 'st sm', style: `--c:${c[1]}` }, c[0]))(ativa(o) ? orcSit(o) : null),
     (c => c && el('span', { class: 'st sm', style: `--c:${c[1]}` }, c[0]))(cobranca(o)));
 }
 
@@ -334,6 +386,7 @@ function detalhe(d, o) {
       el('div', { style: 'margin-top:10px' }, el('span', { class: 'st', style: `--c:${cor}` }, stTxt(o))),
       el('div', { class: 'steps', style: `--c:${cor}` }, [1, 2, 3, 4].map(i => el('div', { class: i <= passo ? 'on' : '' }))),
       el('div', { class: 'steplbl' }, el('span', {}, 'Agendado'), el('span', {}, 'A caminho'), el('span', {}, 'Atendimento'), el('span', {}, 'Finalizada'))),
+    orcamento(o),
     o.posicao && ['deslocamento', 'andamento'].includes(o.status) ? mapa(o.posicao) : null,
     el('section', {}, el('h2', {}, 'Cliente'), dl([['Cliente', d.cliente], ['Fazenda', d.fazenda], ['CPF / CNPJ', d.documento], ['Localização', d.local]])),
     el('section', {}, el('h2', {}, 'Máquina e serviço'),
@@ -445,7 +498,8 @@ async function load() {
     if (!d) { SS.set(''); token = ''; dados = null; last = ''; return entrar('Sua sessão terminou. Entre de novo.'); }
     pasta = d.pasta; document.getElementById('empresa').textContent = d.empresa || 'Minhas OS';
     if (d.trocarSenha) { if (!document.getElementById('nova1')) novaSenha(); return; }
-    if (txt !== last) { last = txt; dados = d; mostrar(); }
+    // não redesenha enquanto o cliente escreve o motivo da recusa
+    if (txt !== last && !document.getElementById('motivo')) { last = txt; dados = d; mostrar(); }
   } catch { if (!last) aviso('Não foi possível carregar agora. Verifique a conexão e tente de novo.'); }
 }
 addEventListener('hashchange', mostrar);
