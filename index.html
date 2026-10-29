@@ -112,6 +112,7 @@ details.maq .card{background:var(--bg)}
 button.btn{border:0;cursor:pointer;min-height:46px}
 button.btn:disabled{opacity:.6}
 .btn.sec{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+.pdfbtn{margin-top:8px}.card .btn{font-size:15px;min-height:40px;padding:8px 14px}
 .pix{display:flex;flex-direction:column;gap:8px;margin-top:8px;align-items:flex-start}
 .pix .qr{background:#fff;border-radius:10px;padding:6px;width:min(240px,100%)}.pix .qr svg{display:block;width:100%;height:auto}
 .pixcod{word-break:break-all;font-family:ui-monospace,Menlo,monospace;color:var(--muted)}
@@ -367,7 +368,8 @@ function cartaoFat(f) {
     el('div', { class: 'small muted' }, [f.emissao && `Emissão ${fmtDate(f.emissao)}`, f.status === 'paga' ? f.pagoEm && `Paga em ${fmtDate(f.pagoEm)}${f.forma ? ' · ' + f.forma : ''}` : f.vencimento && `Vence ${fmtDate(f.vencimento)}`, f.nf && `NF ${f.nf}`].filter(Boolean).join(' · ')),
     el('span', { class: 'st sm', style: `--c:${c}` }, t),
     os.length ? el('div', { class: 'chips', style: 'margin-top:6px' }, os.map(o => el('a', { href: '#' + encodeURIComponent(o.id) }, osNome(o)))) : null,
-    pix(f));
+    pix(f),
+    el('div', { class: 'pdfbtn' }, botaoPdf('Baixar PDF da fatura', () => pdfFatura(dados, f))));
 }
 
 // Financeiro: OS finalizadas ainda sem fatura, faturas aguardando pagamento e faturas pagas
@@ -531,12 +533,202 @@ function detalhe(d, o) {
       : o.total != null ? el('section', { class: 'total' }, el('span', {}, 'Valor total'), el('b', { class: 'num' }, brl(o.total))) : null,
     !ativa(o) && d.faturas ? el('section', {}, el('h2', {}, 'Cobrança'), fatDe(o) ? cartaoFat(fatDe(o)) : el('span', { class: 'st sm', style: '--c:var(--warn)' }, 'A faturar')) : null,
     assinatura(o),
+    el('section', {}, botaoPdf('Baixar PDF da OS', () => pdfOS(d, o), 'btn')),
     zap(d.telefone, `Olá, sobre a ${os}`),
     el('footer', {},
       el('div', {}, [d.empresa, d.cnpj && `CNPJ ${d.cnpj}`].filter(Boolean).join(' · ')),
       [d.telefone, d.email].some(Boolean) ? el('div', {}, [d.telefone, d.email].filter(Boolean).join(' · ')) : null,
       d.endereco ? el('div', {}, d.endereco) : null,
       el('div', { style: 'margin-top:6px' }, o.atualizadoEm ? `Atualizado em ${quando(o.atualizadoEm)}. Esta página se atualiza sozinha.` : 'Esta página se atualiza sozinha.'))].filter(Boolean));
+}
+/* ---------- PDF da OS e da fatura (mesmo layout dos PDFs do app) ---------- */
+const INK = [29, 33, 28], MUT = [93, 101, 91], LINE = [214, 217, 209], YEL = [254, 192, 4], ZEBRA = [246, 247, 244];
+const ST_PDF = { aberto: 'Agendado', deslocamento: 'Deslocamento', aguardando: 'Aguardando atendimento', andamento: 'Em atendimento', pausada: 'Pausada', concluido: 'Finalizada', faturado: 'Faturado' };
+const slug = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+const dia = ts => new Date(ts).toLocaleDateString('sv');
+const carregar = src => new Promise((ok, erro) => { const x = document.createElement('script'); x.src = src; x.onload = ok; x.onerror = erro; document.head.append(x); });
+async function paraJpeg(src, max = 1200) {
+  const im = await new Promise((ok, erro) => { const i = new Image(); i.onload = () => ok(i); i.onerror = erro; i.src = src; });
+  const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+  return { data: c.toDataURL('image/jpeg', 0.85), w: c.width, h: c.height };
+}
+// jsPDF só é baixado quando o cliente pede um PDF
+let libPdf = null;
+const prepararPdf = () => libPdf ||= (async () => {
+  if (!window.jspdf?.jsPDF) await carregar('vendor/jspdf.umd.min.js');
+  if (!window.jspdf.jsPDF.API.autoTable) await carregar('vendor/jspdf.plugin.autotable.min.js');
+  return paraJpeg('icons/logo-pdf.jpg', 1000);
+})().catch(e => { libPdf = null; throw e; });
+async function fotoJpeg(id) {
+  if (String(id || '').startsWith('data:image/')) return paraJpeg(id, 800).catch(() => null);
+  if (!/^sb-/.test(id || '')) return null;
+  try {
+    if (!urls[id]) { const r = await fetch(`${C.supabaseUrl}/storage/v1/object/authenticated/fotos/${pasta}/${encodeURIComponent(id)}`, { headers: H }); if (!r.ok) return null; urls[id] = URL.createObjectURL(await r.blob()); }
+    return await paraJpeg(urls[id]);
+  } catch { return null; }
+}
+async function pdfBase(kind, label, subline) {
+  const logo = await prepararPdf(), d = dados;
+  const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth(), M = 14;
+  doc.setFillColor(0, 0, 0); doc.rect(0, 0, W, 30, 'F');
+  doc.addImage(logo.data, 'JPEG', M - 2, 2, 33.8, 26);
+  const emp = [d.cnpj && `CNPJ ${d.cnpj}`, [d.telefone, d.email].filter(Boolean).join(' · '), d.endereco].filter(Boolean);
+  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+  doc.text(d.empresa || 'Longhi Manutenções', 56, emp.length ? 11 : 16);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(220, 220, 220);
+  emp.slice(0, 3).forEach((l, i) => doc.text(doc.splitTextToSize(l, 88)[0], 56, 16.5 + i * 4.4));
+  doc.setFontSize(7.5); doc.setTextColor(...YEL); doc.text(kind, W - M, 8, { align: 'right' });
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(label.length > 14 ? 13 : 18); doc.text(label, W - M, 14.5, { align: 'right' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(255, 255, 255); if (subline) doc.text(subline, W - M, 20.5, { align: 'right' });
+  doc.setTextColor(...INK);
+  const ctx = { doc, W, M, y: 38, CW: W - 2 * M, H: doc.internal.pageSize.getHeight() };
+  ctx.space = h => { if (ctx.y + h > ctx.H - 18) { doc.addPage(); ctx.y = M; } };
+  ctx.heading = t => { ctx.space(14); ctx.y += 4; doc.setFillColor(...YEL); doc.rect(M, ctx.y - 3.6, 1.6, 4.6, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...INK); doc.text(t.toUpperCase(), M + 3.6, ctx.y); ctx.y += 2; doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(M, ctx.y, M + ctx.CW, ctx.y); ctx.y += 5; };
+  ctx.para = (t, size = 10, color = INK) => { doc.setFont('helvetica', 'normal'); doc.setFontSize(size); doc.setTextColor(...color); for (const line of doc.splitTextToSize(t, ctx.CW)) { ctx.space(5); doc.text(line, M, ctx.y); ctx.y += size * 0.45; } ctx.y += 1.5; };
+  ctx.bold = t => { doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...INK); for (const line of doc.splitTextToSize(t, ctx.CW)) { ctx.space(5); doc.text(line, M, ctx.y); ctx.y += 4.5; } ctx.y += 1; };
+  ctx.kv = pairs => { const colW = ctx.CW / 2; for (let i = 0; i < pairs.length; i += 2) { ctx.space(10); [pairs[i], pairs[i + 1]].forEach((p, j) => { if (!p) return; doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...MUT); doc.text(p[0].toUpperCase(), M + j * colW, ctx.y); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...INK); doc.text(doc.splitTextToSize(String(p[1] || '—'), colW - 4)[0], M + j * colW, ctx.y + 4.5); }); ctx.y += 10; } };
+  ctx.table = (head, body, right = [], foot, extra = {}) => {
+    const cs = {}; right.forEach(i => cs[i] = { halign: 'right' });
+    const { columnStyles = {}, didParseCell, ...rest } = extra;
+    doc.autoTable({ startY: ctx.y, head: [head], body, foot: foot ? [foot] : undefined, showFoot: 'lastPage', margin: { left: M, right: M, bottom: 18 }, theme: 'plain',
+      styles: { font: 'helvetica', fontSize: 9, cellPadding: { top: 2.4, bottom: 2.4, left: 2.8, right: 2.8 }, textColor: INK, lineColor: LINE, lineWidth: { bottom: 0.2 } },
+      headStyles: { fillColor: INK, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5, lineWidth: 0 },
+      footStyles: { fillColor: INK, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9.5, lineWidth: 0 },
+      alternateRowStyles: { fillColor: ZEBRA }, columnStyles: { ...cs, ...columnStyles },
+      didParseCell: x => { if (x.section !== 'body' && right.includes(x.column.index)) x.cell.styles.halign = 'right'; if (x.section === 'foot' && x.column.index === head.length - 1) x.cell.styles.textColor = YEL; didParseCell?.(x); },
+      ...rest });
+    ctx.y = doc.lastAutoTable.finalY + 5;
+  };
+  ctx.photos = async (ids, caps = []) => {
+    const list = (await Promise.all((ids || []).map(fotoJpeg))).map((x, i) => x && { ...x, cap: caps[i] }).filter(Boolean);
+    const gap = 4, cols = 3, cw = (ctx.CW - gap * (cols - 1)) / cols, ch = 44;
+    for (let i = 0; i < list.length; i += cols) {
+      ctx.space(ch + (caps.length ? 6 : 2));
+      list.slice(i, i + cols).forEach((im, j) => {
+        const k = Math.min(cw / im.w, ch / im.h), w = im.w * k, h = im.h * k;
+        doc.addImage(im.data, 'JPEG', M + j * (cw + gap) + (cw - w) / 2, ctx.y + (ch - h) / 2, w, h);
+        if (im.cap) { doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...MUT); doc.text(im.cap, M + j * (cw + gap) + cw / 2, ctx.y + ch + 4, { align: 'center' }); }
+      });
+      ctx.y += ch + (caps.length ? 8 : 4);
+    }
+  };
+  ctx.footer = left => { const pages = doc.getNumberOfPages(); for (let i = 1; i <= pages; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...MUT); doc.text(left, M, ctx.H - 8); doc.text(`Página ${i} de ${pages}`, W - M, ctx.H - 8, { align: 'right' }); } };
+  return ctx;
+}
+async function pdfOS(d, o) {
+  const fin = !ativa(o), tipo = TIPOS[o.tipo] || o.tipo || '';
+  const ctx = await pdfBase('ORDEM DE SERVIÇO', osNome(o), `${fmtDate(o.data)} · ${ST_PDF[o.status] || ''}`), { doc, M } = ctx;
+  ctx.heading('Cliente');
+  ctx.kv([['Cliente', d.cliente], ['Fazenda', d.fazenda], ['CPF / CNPJ', d.documento], ['Localização', d.local]]);
+  ctx.heading('Máquina e serviço');
+  ctx.kv([['Máquina', o.maquina], ['Nº de série / chassi', o.serie], ['Ano', o.ano], ['Horímetro', o.horimetro ? `${o.horimetro} h` : ''], ['Tipo de serviço', tipo], ['Data', fmtDate(o.data)]]);
+  const fm = [[o.fotoHorimetro, 'Horímetro'], [o.fotoChassi, 'Chassi / plaqueta']].filter(x => x[0]);
+  if (fm.length) await ctx.photos(fm.map(x => x[0]), fm.map(x => x[1]));
+  if (o.falha || (o.fotosFalha || []).length) { ctx.heading(o.categoria ? `Falha · ${o.categoria}` : 'Falha'); if (o.falha) ctx.para(o.falha); await ctx.photos(o.fotosFalha); }
+  if (o.causa) { ctx.heading('Causa'); ctx.para(o.causa); }
+  if (o.solucao) { ctx.heading('Solução'); ctx.para(o.solucao); }
+  const testes = (o.testes || []).filter(t => t.desc || (t.fotos || []).length);
+  if (testes.length) { ctx.heading('Testes realizados'); for (const [i, t] of testes.entries()) { ctx.space((t.fotos || []).length ? 58 : 8); ctx.bold(`${i + 1}. ${t.desc || 'Teste'}`); await ctx.photos(t.fotos); } }
+  const mat = (o.materiais || []).filter(m => m.desc || num(m.qtd));
+  if (mat.length) {
+    ctx.heading('Materiais de consumo');
+    if (fin) ctx.table(['Descrição', 'Qtd', 'Valor un.', 'Subtotal'], mat.map(m => [m.desc || '', String(m.qtd ?? ''), brl(num(m.valor)), brl(num(m.qtd) * num(m.valor))]), [1, 2, 3], null, { columnStyles: { 1: { cellWidth: 18 }, 2: { cellWidth: 30 }, 3: { cellWidth: 30 } } });
+    else ctx.table(['Descrição', 'Qtd'], mat.map(m => [m.desc || '', String(m.qtd ?? '')]), [1], null, { columnStyles: { 1: { cellWidth: 24 } } });
+  }
+  if ((o.fotos || []).length) { ctx.heading('Fotos do serviço'); await ctx.photos(o.fotos); }
+  const ck = o.checklist || [];
+  if (ck.length) {
+    ctx.heading('Checklist de inspeção');
+    const linhas = grupos(ck).flatMap(([g, l]) => [...(g ? [{ titulo: g }] : []), ...l]);
+    ctx.table(['Ponto inspecionado', 'Situação', 'Observação'], linhas.map(x => x.titulo ? [{ content: x.titulo, colSpan: 3, styles: { fontStyle: 'bold', fillColor: [236, 238, 232] } }] : [x.item || '', CK[x.estado] || '—', x.obs || '']), [], null, {
+      columnStyles: { 0: { cellWidth: 62 }, 1: { cellWidth: 24 } },
+      didParseCell: x => { if (x.section === 'body' && x.column.index === 1 && !linhas[x.row.index].titulo) { const v = linhas[x.row.index].estado; x.cell.styles.fontStyle = 'bold'; x.cell.styles.textColor = v === 'ok' ? [47, 122, 59] : v === 'nok' ? [179, 38, 30] : v === 'atencao' ? [168, 116, 0] : v === 'trocado' ? [44, 95, 138] : MUT; } } });
+    for (const x of linhas.filter(x => (x.fotos || []).length)) { ctx.space(58); ctx.bold(`${x.item}${CK[x.estado] ? ' · ' + CK[x.estado] : ''}`); await ctx.photos(x.fotos); }
+  }
+  if (o.cuidados) { ctx.heading('Cuidados e recomendações'); ctx.para(o.cuidados); }
+  const ap = (o.apontamentos || []).filter(x => x.ini).sort((a, b) => a.ini - b.ini);
+  if (ap.some(x => x.tipo !== 'pausa')) {
+    ctx.heading('Apontamentos');
+    const pausaApos = x => { const nx = ap[ap.indexOf(x) + 1]; return nx && nx.tipo === 'pausa' && x.fim && nx.ini >= x.fim - 60000 ? nx : null; };
+    ctx.table(['Tipo', 'Data', 'Início', 'Término', 'Total', 'Observação'], ap.filter(x => x.tipo !== 'pausa').map(x => x.tipo === 'deslocamento'
+      ? ['Deslocamento', fmtDate(dia(x.ini)), x.kmIni != null ? km(x.kmIni) : hora(x.ini), x.kmFim != null ? km(x.kmFim) : 'em andamento', x.kmFim != null && x.kmIni != null ? km(num(x.kmFim) - num(x.kmIni)) : '', '']
+      : [TIPO[x.tipo] || x.tipo, fmtDate(dia(x.ini)), hora(x.ini), x.fim ? hora(x.fim) : 'em andamento', x.fim ? horas((x.fim - x.ini) / 3600000) : '', (p => p ? `Pausado: ${p.motivo || 'sem motivo'}` : '')(pausaApos(x))]),
+      [4], null, { columnStyles: { 0: { cellWidth: 27, fontStyle: 'bold' }, 1: { cellWidth: 22 }, 2: { cellWidth: 24 }, 3: { cellWidth: 29 }, 4: { cellWidth: 17 } },
+        didParseCell: x => { if (x.section === 'body' && x.column.index === 5) x.cell.styles.textColor = MUT; } });
+  }
+  const v = o.valores;
+  if (v) {
+    ctx.heading('Valores');
+    ctx.table(['Descrição', 'Quantidade', 'Valor'], [['Mão de obra', horas(v.horas), brl(num(v.mo))], ['Deslocamento', km(v.km), brl(num(v.desl))], ['Materiais de consumo', mat.length ? `${mat.length} item(ns)` : '—', brl(num(v.pecas))]],
+      [1, 2], ['Total', '', brl(num(o.total))], { columnStyles: { 1: { cellWidth: 34 }, 2: { cellWidth: 38 } } });
+  }
+  const gd = d.garantiaDias == null || d.garantiaDias === '' ? 90 : num(d.garantiaDias);
+  if (fin && gd && o.data) ctx.para(`Garantia do serviço: ${gd} dias, até ${fmtDate(new Date(new Date(o.data).getTime() + gd * 864e5).toISOString().slice(0, 10))}.`, 9);
+  const s = o.assinatura;
+  if (s) {
+    const im = await fotoJpeg(s.img || s.id);
+    ctx.space(64); ctx.heading('Assinatura do cliente');
+    const tot = s.total ?? o.total; if (tot != null) ctx.para(ACORDO(num(tot)), 9);
+    if (im) { const k = Math.min(70 / im.w, 28 / im.h); doc.addImage(im.data, 'JPEG', M, ctx.y, im.w * k, im.h * k); ctx.y += im.h * k + 2; }
+    doc.setDrawColor(...INK); doc.setLineWidth(0.3); doc.line(M, ctx.y, M + 80, ctx.y); ctx.y += 4;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...MUT);
+    doc.text([s.nome, s.em && new Date(s.em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }), s.img && 'assinado pelo portal'].filter(Boolean).join(' · '), M, ctx.y); ctx.y += 5;
+    doc.setFontSize(8); doc.text(doc.splitTextToSize(CONSENT, ctx.CW), M, ctx.y); ctx.y += 6;
+  }
+  ctx.footer(`${d.empresa || ''} ${osNome(o)} · ${d.cliente || ''}`.trim());
+  doc.save(`${osNome(o).replace(' ', '-')}-${slug(d.cliente) || 'cliente'}.pdf`);
+}
+async function pdfFatura(d, f) {
+  const nome = 'FAT ' + String(f.numero || 0).padStart(4, '0'), sit = fatSit(f);
+  const ctx = await pdfBase('FATURA', nome, f.emissao ? `Emissão ${fmtDate(f.emissao)}` : ''), { doc, M } = ctx;
+  ctx.heading('Cliente');
+  ctx.kv([['Cliente', d.cliente], ['Fazenda', d.fazenda], ['CPF / CNPJ', d.documento], ['Localização', d.local]]);
+  const it = f.itens || [], sum = k => it.reduce((s, x) => s + num(x[k]), 0);
+  ctx.heading('Serviços');
+  ctx.table(['OS', 'Data', 'Serviço', 'Horas', 'Km', 'Valor'], it.map(x => [x.os || '', fmtDate(x.data), x.servico || '', horas(x.horas), num(x.km).toLocaleString('pt-BR'), brl(num(x.total))]), [3, 4, 5], null,
+    { columnStyles: { 0: { cellWidth: 20, fontStyle: 'bold' }, 1: { cellWidth: 22 }, 3: { cellWidth: 20, halign: 'right' }, 4: { cellWidth: 16, halign: 'right' }, 5: { cellWidth: 28, halign: 'right' } } });
+  ctx.heading('Valores');
+  const rows = [['Mão de obra', horas(sum('horas')), brl(sum('mo'))], ['Deslocamento', km(sum('km')), brl(sum('desl'))], ['Materiais de consumo', '', brl(sum('pecas'))]];
+  if (num(f.desconto) > 0) rows.push(['Desconto', '', '- ' + brl(num(f.desconto))]);
+  ctx.table(['Descrição', 'Quantidade', 'Valor'], rows, [1, 2], ['Total', '', brl(num(f.total))], { columnStyles: { 1: { cellWidth: 34 }, 2: { cellWidth: 38 } } });
+  ctx.heading('Pagamento');
+  ctx.kv([['Vencimento', fmtDate(f.vencimento)], ['Situação', f.status === 'paga' ? `Paga em ${fmtDate(f.pagoEm)}${f.forma ? ' · ' + f.forma : ''}` : sit === 'vencida' ? 'Vencida' : 'Em aberto'],
+    d.pix?.chave && ['Chave PIX', d.pix.chave], d.banco && ['Dados bancários', d.banco]].filter(Boolean));
+  const cod = pixDe(f), q = cod && window.qrcode && (() => { const x = qrcode(0, 'M'); x.addData(cod); x.make(); return x; })();
+  if (q) {
+    const S = 34, k = q.getModuleCount(), m = S / k, tx = M + S + 6, tw = ctx.CW - S - 6;
+    ctx.space(S + 6);
+    const y0 = ctx.y;
+    doc.setFillColor(0, 0, 0);
+    for (let r = 0; r < k; r++) for (let c = 0; c < k; c++) {
+      if (!q.isDark(r, c)) continue;
+      let e = c; while (e + 1 < k && q.isDark(r, e + 1)) e++;
+      doc.rect(M + c * m, y0 + r * m, (e - c + 1) * m, m + 0.05, 'F'); c = e;
+    }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...INK); doc.text(`Pague com Pix · ${brl(num(f.total))}`, tx, y0 + 4);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...MUT); doc.text('Leia o QR code no app do banco ou use o Pix copia e cola:', tx, y0 + 9);
+    doc.setFont('courier', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...INK);
+    const ls = doc.splitTextToSize(cod, tw); ls.forEach((l, i) => doc.text(l, tx, y0 + 14 + i * 3.3));
+    ctx.y = y0 + Math.max(S, 14 + ls.length * 3.3) + 4;
+  }
+  if (f.obs) { ctx.heading('Observações'); ctx.para(f.obs); }
+  ctx.y += 2;
+  ctx.para(f.nf ? `Nota fiscal nº ${f.nf}${f.nfData ? ' emitida em ' + fmtDate(f.nfData) : ''}${f.nfCodigo ? ' · código de verificação ' + f.nfCodigo : ''}.` : 'Este documento não é nota fiscal.', 8.5, MUT);
+  ctx.footer(`${d.empresa || 'Longhi Manutenções'} · ${nome} · ${d.cliente || ''}`);
+  doc.save(`${nome.replace(' ', '-')}-${slug(d.cliente) || 'cliente'}.pdf`);
+}
+function botaoPdf(rotulo, gerar, cls = 'btn sec') {
+  const b = el('button', { type: 'button', class: cls }, rotulo);
+  b.onclick = async () => {
+    b.disabled = true; b.textContent = 'Gerando PDF…';
+    try { await gerar(); b.textContent = rotulo; }
+    catch { b.textContent = 'Não foi possível gerar. Toque de novo.'; }
+    finally { b.disabled = false; }
+  };
+  return b;
 }
 const aviso = txt => out.replaceChildren(el('p', { class: 'empty muted' }, txt));
 
