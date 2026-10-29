@@ -116,6 +116,9 @@ button.btn:disabled{opacity:.6}
 .pix .qr{background:#fff;border-radius:10px;padding:6px;width:min(240px,100%)}.pix .qr svg{display:block;width:100%;height:auto}
 .pixcod{word-break:break-all;font-family:ui-monospace,Menlo,monospace;color:var(--muted)}
 .campo{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:14px;color:var(--muted);width:100%}
+.campo input{font:400 16px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;min-height:44px}
+.pad{display:block;width:100%;height:170px;background:#fff;border:1px solid var(--line);border-radius:10px;touch-action:none;cursor:crosshair}
+.assinar{display:flex;flex-direction:column;gap:10px}.assinar h2,.assinar p{margin:0}
 .campo textarea{font:400 16px var(--body);color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;resize:vertical}
 .voltar{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px;margin-bottom:-10px}
 </style></head><body>
@@ -238,6 +241,65 @@ function orcamento(o) {
   };
   inicio();
   sec.append(acoes, err);
+  return sec;
+}
+
+// Assinatura: quem não estava no local assina aqui a OS finalizada
+const ACORDO = v => `Declaro que concordo com os serviços descritos nesta ordem de serviço e com o valor total cobrado de ${brl(v)}.`;
+const CONSENT = 'Confirmo a execução do serviço e autorizo o uso dos meus dados para o registro deste atendimento (LGPD).';
+function assinatura(o) {
+  const s = o.assinatura, total = s?.total ?? o.total;
+  if (s) return el('section', {}, el('h2', {}, 'Assinatura do cliente'),
+    total != null ? el('p', { class: 'small' }, ACORDO(total)) : null,
+    s.img ? el('img', { class: 'assin', alt: 'Assinatura', src: s.img }) : s.id && /^sb-/.test(s.id) ? imagem(s.id, 'assin') : null,
+    el('p', { class: 'small muted', style: 'margin-top:6px' }, [s.nome, s.em && quando(s.em), s.img && 'assinado pelo portal'].filter(Boolean).join(' · ')));
+  if (ativa(o)) return null;
+  const nome = el('input', { id: 'assnome', autocomplete: 'name', maxlength: '120' });
+  const cv = el('canvas', { class: 'pad', 'aria-label': 'Quadro para assinar com o dedo ou o mouse' });
+  const err = el('p', { class: 'erro', role: 'alert' });
+  const limpar = el('button', { type: 'button', class: 'btn sec' }, 'Limpar'), ok = el('button', { type: 'button', class: 'btn' }, 'Assinar');
+  const sec = el('section', { class: 'assinar' }, el('h2', {}, 'Assinatura do cliente'),
+    total != null ? el('p', { class: 'small' }, ACORDO(total)) : null,
+    el('label', { class: 'campo', for: 'assnome' }, 'Seu nome', nome),
+    el('div', { class: 'campo' }, 'Assine no quadro', cv),
+    el('p', { class: 'small muted' }, CONSENT),
+    el('div', { class: 'orcacoes' }, ok, limpar), err);
+  // enquanto o cliente assina, a atualização automática não redesenha a página
+  const ocupado = () => { sec.dataset.ocupado = '1'; };
+  nome.addEventListener('input', ocupado);
+  let g = null, ant = null, box = null;
+  const iniciar = () => {
+    if (g && cv.width === Math.round(cv.offsetWidth * (devicePixelRatio || 1))) return;
+    const dpr = devicePixelRatio || 1; cv.width = Math.round(cv.offsetWidth * dpr); cv.height = Math.round(cv.offsetHeight * dpr);
+    g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+    g.lineWidth = 2.6 * dpr; g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#111'; box = null;
+  };
+  const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+  const cresce = ([x, y]) => { box = box ? [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)] : [x, y, x, y]; };
+  cv.addEventListener('pointerdown', e => { if (!g) iniciar(); cv.setPointerCapture(e.pointerId); ant = pt(e); ocupado(); err.textContent = ''; });
+  cv.addEventListener('pointermove', e => { if (!ant) return; const p = pt(e); g.beginPath(); g.moveTo(...ant); g.lineTo(...p); g.stroke(); cresce(ant); cresce(p); ant = p; });
+  ['pointerup', 'pointercancel'].forEach(t => cv.addEventListener(t, () => ant = null));
+  limpar.onclick = () => { g = null; iniciar(); err.textContent = ''; };
+  // recorta só a área assinada e reduz, para a imagem ficar leve
+  const imagemPng = () => {
+    const pad = 10 * (devicePixelRatio || 1), x0 = Math.max(0, box[0] - pad), y0 = Math.max(0, box[1] - pad);
+    const w = Math.min(cv.width, box[2] + pad) - x0, h = Math.min(cv.height, box[3] + pad) - y0, k = Math.min(1, 480 / w, 160 / h);
+    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const cg = c.getContext('2d'); cg.fillStyle = '#fff'; cg.fillRect(0, 0, c.width, c.height); cg.drawImage(cv, x0, y0, w, h, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png');
+  };
+  ok.onclick = async () => {
+    err.textContent = '';
+    if (nome.value.trim().length < 2) { err.textContent = 'Escreva o seu nome.'; return nome.focus(); }
+    if (!box) { err.textContent = 'Assine no quadro.'; return; }
+    ok.disabled = limpar.disabled = true; ok.textContent = 'Enviando…';
+    try {
+      const r = JSON.parse(await rpc('portal_assinar', { p_token: token, p_os: o.id, p_nome: nome.value.trim(), p_img: imagemPng() }));
+      if (r === null) { SS.set(''); token = ''; dados = null; last = ''; return entrar('Sua sessão terminou. Entre de novo.'); }
+      delete sec.dataset.ocupado; last = ''; await load();
+    } catch (e) { err.textContent = e.msg || 'Sem conexão. Tente de novo.'; ok.disabled = limpar.disabled = false; ok.textContent = 'Assinar'; }
+  };
+  requestAnimationFrame(iniciar);
   return sec;
 }
 
@@ -468,10 +530,7 @@ function detalhe(d, o) {
         ['Materiais de consumo', mat.length ? `${mat.length} item(ns)` : '—', brl(v.pecas)]], ['Total', '', brl(o.total)], [1, 2]))
       : o.total != null ? el('section', { class: 'total' }, el('span', {}, 'Valor total'), el('b', { class: 'num' }, brl(o.total))) : null,
     !ativa(o) && d.faturas ? el('section', {}, el('h2', {}, 'Cobrança'), fatDe(o) ? cartaoFat(fatDe(o)) : el('span', { class: 'st sm', style: '--c:var(--warn)' }, 'A faturar')) : null,
-    o.assinatura ? el('section', {}, el('h2', {}, 'Assinatura do cliente'),
-      o.total != null ? el('p', { class: 'small' }, `Declaro que concordo com os serviços descritos nesta ordem de serviço e com o valor total cobrado de ${brl(o.total)}.`) : null,
-      o.assinatura.id && /^sb-/.test(o.assinatura.id) ? imagem(o.assinatura.id, 'assin') : null,
-      el('p', { class: 'small muted', style: 'margin-top:6px' }, [o.assinatura.nome, o.assinatura.em && quando(o.assinatura.em)].filter(Boolean).join(' · '))) : null,
+    assinatura(o),
     zap(d.telefone, `Olá, sobre a ${os}`),
     el('footer', {},
       el('div', {}, [d.empresa, d.cnpj && `CNPJ ${d.cnpj}`].filter(Boolean).join(' · ')),
@@ -551,7 +610,7 @@ async function load() {
     pasta = d.pasta; document.getElementById('empresa').textContent = d.empresa || 'Minhas OS';
     if (d.trocarSenha) { if (!document.getElementById('nova1')) novaSenha(); return; }
     // não redesenha enquanto o cliente escreve o motivo da recusa
-    if (txt !== last && !document.getElementById('motivo')) { last = txt; dados = d; mostrar(); }
+    if (txt !== last && !document.getElementById('motivo') && !document.querySelector('[data-ocupado]')) { last = txt; dados = d; mostrar(); }
   } catch { if (!last) aviso('Não foi possível carregar agora. Verifique a conexão e tente de novo.'); }
 }
 addEventListener('hashchange', mostrar);
