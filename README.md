@@ -1,4 +1,4 @@
-# Portal do cliente · Longhi Manutenções
+# Portal do cliente · Longhi Soluções Agrícolas
 
 Página onde o cliente entra com usuário e senha e acompanha as ordens de serviço dele:
 a que está em andamento, o histórico e o valor total depois de finalizada.
