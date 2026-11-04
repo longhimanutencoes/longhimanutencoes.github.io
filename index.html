@@ -157,6 +157,9 @@ const hora = ts => new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', m
 const mesmoDia = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 const periodo = x => x.fim ? `${quando(x.ini)}–${mesmoDia(x.ini, x.fim) ? hora(x.fim) : quando(x.fim)}` : `desde ${quando(x.ini)}`;
 const TIPO = { deslocamento: 'Deslocamento', trabalho: 'Atendimento', pausa: 'Pausa' };
+// Razão social no PDF e no rodapé (Ajustes › Empresa no app); enquanto o portal não recebe esse campo, usa a da Longhi
+const RAZAO_PADRAO = 'Longhi Manutenções de Máquinas Agrícolas LTDA';
+const razaoSocial = d => (d.razao ?? RAZAO_PADRAO) || d.empresa || 'Longhi Soluções Agrícolas';
 const TIPOS = { revisao: 'Revisão', plantio: 'Acompanhamento de plantio', diagnostico: 'Diagnóstico', manutencao: 'Manutenção / reparo', outro: 'Outro' };
 // pontos do checklist separados pelo grupo (Revisão trator, Plantadeira...); sem grupo ficam em "Outros pontos"
 const grupos = ck => { const ns = [...new Set(ck.map(x => x.grupo || ''))]; return ns.map(n => [ns.length > 1 || n ? n || 'Outros pontos' : '', ck.filter(x => (x.grupo || '') === n)]); };
@@ -536,7 +539,7 @@ function detalhe(d, o) {
     el('section', {}, botaoPdf('Baixar PDF da OS', () => pdfOS(d, o), 'btn')),
     zap(d.telefone, `Olá, sobre a ${os}`),
     el('footer', {},
-      el('div', {}, [d.empresa, d.cnpj && `CNPJ ${d.cnpj}`].filter(Boolean).join(' · ')),
+      el('div', {}, [razaoSocial(d), d.cnpj && `CNPJ ${d.cnpj}`].filter(Boolean).join(' · ')),
       [d.telefone, d.email].some(Boolean) ? el('div', {}, [d.telefone, d.email].filter(Boolean).join(' · ')) : null,
       d.endereco ? el('div', {}, d.endereco) : null,
       el('div', { style: 'margin-top:6px' }, o.atualizadoEm ? `Atualizado em ${quando(o.atualizadoEm)}. Esta página se atualiza sozinha.` : 'Esta página se atualiza sozinha.'))].filter(Boolean));
@@ -577,7 +580,8 @@ async function pdfBase(kind, label, subline) {
   doc.addImage(logo.data, 'JPEG', M - 2, 2, 33.8, 26);
   const emp = [d.cnpj && `CNPJ ${d.cnpj}`, [d.telefone, d.email].filter(Boolean).join(' · '), d.endereco].filter(Boolean);
   doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-  doc.text(d.empresa || 'Longhi Soluções Agrícolas', 56, emp.length ? 11 : 16);
+  const nome = razaoSocial(d); if (doc.getTextWidth(nome) > 96) doc.setFontSize(Math.max(8, 11 * 96 / doc.getTextWidth(nome)));
+  doc.text(nome, 56, emp.length ? 11 : 16);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(220, 220, 220);
   emp.slice(0, 3).forEach((l, i) => doc.text(doc.splitTextToSize(l, 88)[0], 56, 16.5 + i * 4.4));
   doc.setFontSize(7.5); doc.setTextColor(...YEL); doc.text(kind, W - M, 8, { align: 'right' });
